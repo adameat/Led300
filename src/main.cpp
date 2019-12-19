@@ -1,6 +1,7 @@
 #define PIN 6
 #define NUM_LEDS 300
 #include "Adafruit_NeoPixel.h"
+#include "sprite.h"
 
 Adafruit_NeoPixel Strip(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
 using TStripType = Adafruit_NeoPixel;
@@ -10,8 +11,7 @@ constexpr unsigned int countof(T (&)[N]) { return N; }
 
 void setup() {
     Strip.begin();
-    Strip.setBrightness(255);
-    pinMode(13, OUTPUT);
+    Strip.setBrightness(50);
 }
 
 class TActor {
@@ -456,26 +456,82 @@ protected:
     const ColorsType& Colors;
 };
 
+template <typename AnimationType, int Count>
+class TAnimationActor : TActor {
+public:
+    TAnimationActor(const AnimationType& animation)
+        : Animation(animation)
+    {
+        Period = 20;
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        uint32_t time = millis();
+        for (unsigned int i = 0; i < Count; ++i) {
+            int position = Positions[i];
+            const auto* image = Animations[i].GetCurrentImage(Animation, time);
+            if (image) {
+                for (unsigned int p = 0; p < Animation.GetSize(); ++p) {
+                    strip.setPixelColor(position + p, (*image)[p]);
+                }
+            }
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            Animations[AnimationNum].Start(millis());
+            Positions[AnimationNum] = random(NUM_LEDS - Animation.GetSize() + 1);
+            AnimationNum = (AnimationNum + 1) % Count;
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    const AnimationType& Animation;
+    TAnimationPlay Animations[Count];
+    int Positions[Count];
+    int AnimationNum = 0;
+};
 
 //uint32_t Pattern[] = {0x400040, 0x800080, 0xC000C0, 0xFF00FF};
 //uint32_t Pattern[] = {0x000000, 0xFFFFFF};
 uint32_t Pattern[] = {0x000000, 0x010001, 0x100010, 0x200020, 0x400040, 0x800080, 0xC000C0, 0xFF00FF, 0xFF00FF, 0xFF00FF,
                       0xFF00FF, 0xFF00FF, 0xFF00FF, 0xC000C0, 0x800080, 0x400040, 0x200020, 0x100010, 0x010001, 0x000000};
+uint32_t ChaoticPattern[] = {0x000000, 0x010101, 0x101010, 0x404040, 0x101010, 0x010101, 0x000000};
+
+//uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF};
+uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF};
+uint32_t WhiteColor[] = {0xFFFFFF};
+uint32_t RainbowColors[] = {0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x2E2B5F, 0x8B00FF};
+
+TAnimation<10, 9> Animation1 = {
+    {
+        {8, {0x000000, 0x000000, 0x000000, 0x000000, 0xFFFFFF, 0x000000, 0x000000, 0x000000, 0x000000}},
+        {8, {0x000000, 0x000000, 0x000000, 0xC0C0C0, 0xFFFFFF, 0xC0C0C0, 0x000000, 0x000000, 0x000000}},
+        {8, {0x000000, 0x000000, 0x000000, 0xFFFFFF, 0xC0C0C0, 0xFFFFFF, 0x000000, 0x000000, 0x000000}},
+        {5, {0x000000, 0x000000, 0xC0C0C0, 0xC0C0C0, 0x808080, 0xC0C0C0, 0xC0C0C0, 0x000000, 0x000000}},
+        {5, {0x000000, 0x000000, 0xC0C0C0, 0x808080, 0x404040, 0x808080, 0xC0C0C0, 0x000000, 0x000000}},
+        {5, {0x000000, 0x000000, 0x808080, 0x404040, 0x202020, 0x404040, 0x808080, 0x000000, 0x000000}},
+        {8, {0x000000, 0x404040, 0x202020, 0x101010, 0x080808, 0x101010, 0x202020, 0x404040, 0x000000}},
+        {8, {0x202020, 0x101010, 0x080808, 0x040404, 0x040004, 0x040404, 0x080808, 0x101010, 0x202020}},
+        {8, {0x101010, 0x080808, 0x040404, 0x040004, 0x040004, 0x000004, 0x040404, 0x080808, 0x101010}},
+        {8, {0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000}}
+    }
+};
+
 TPatternActor<decltype(Pattern)> PatternActor(Pattern, 1, true, 40);
 TSmoothPatternActor<decltype(Pattern)> SmoothPatternActor(Pattern, true);
-uint32_t ChaoticPattern[] = {0x010101, 0x101010, 0x404040, 0x101010, 0x010101};
 TChaoticPatternMovementActor<decltype(ChaoticPattern)> ChaoticPatternMovementActor(ChaoticPattern);
 TChaoticPatternMovementWithRandomTrailActor<decltype(ChaoticPattern)> ChaoticPatternMovementWithRandomTrailActor(ChaoticPattern);
 TRandomFillActor RandomFillActor;
 TRandomShifterActor RandomShifterActor;
-//uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF};
-uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF};
 TRandomSelectorShifterActor<decltype(Colors)> RandomSelectorShifterActor(Colors);
 TRandomSelectorSmoothShifterActor<decltype(Colors)> RandomSelectorSmoothShifterActor(Colors);
-uint32_t WhiteColor[] = {0xFFFFFF};
 TDecayingSplashesActor<decltype(WhiteColor)> DecayingSplashesActor(1, 5, WhiteColor);
-uint32_t RainbowColors[] = {0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x2E2B5F, 0x8B00FF};
 TProportionalColorsActor<decltype(RainbowColors)> ProportionalColorsActor(RainbowColors);
+TAnimationActor<decltype(Animation1), 10> AnimationActor(Animation1);
 
 void loop() {
     //RandomSelectorSmoothShifterActor.Move(Strip);
@@ -484,6 +540,7 @@ void loop() {
     //ChaoticPatternMovementWithRandomTrailActor.Move(Strip);
     //PatternActor.Move(Strip);
     //DecayingSplashesActor.Move(Strip);
-    ProportionalColorsActor.Move(Strip);
+    //ProportionalColorsActor.Move(Strip);
+    AnimationActor.Move(Strip);
     Strip.show();
 }
