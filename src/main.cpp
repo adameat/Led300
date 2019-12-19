@@ -389,6 +389,74 @@ protected:
     const ColorsType& Colors;
 };
 
+template <typename ColorsType>
+class TDecayingSplashesActor : TActor {
+public:
+    TDecayingSplashesActor(int amount, int speed, const ColorsType& colors)
+        : Amount(amount)
+        , Speed(speed)
+        , Colors(colors)
+    {
+        Period = 5;
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            strip.setPixelColor(i, PixelsDesired[i].Value);
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            for (unsigned i = 0; i < NUM_LEDS; ++i) {
+                PixelsDesired[i].R -= min(PixelsDesired[i].R, Speed);
+                PixelsDesired[i].G -= min(PixelsDesired[i].G, Speed);
+                PixelsDesired[i].B -= min(PixelsDesired[i].B, Speed);
+            }
+            for (int i = 0; i < Amount; ++i) {
+                PixelsDesired[random(NUM_LEDS)].Value = Colors[random(countof(Colors))];
+            }
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    TColorRGB PixelsDesired[NUM_LEDS] = {};
+    int Amount;
+    int Speed;
+    const ColorsType& Colors;
+};
+
+template <typename ColorsType>
+class TProportionalColorsActor : TActor, TColorSmoother {
+public:
+    TProportionalColorsActor(const ColorsType& colors)
+        : Colors(colors)
+    {
+        Period = 1000;
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        float colorSize = float(NUM_LEDS) / (countof(Colors) - 1);
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            unsigned int colorIndex = i / colorSize;
+            strip.setPixelColor(i, MergeColors(Colors[colorIndex], Colors[colorIndex + 1], (i - colorSize * colorIndex) / colorSize));
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    const ColorsType& Colors;
+};
+
+
 //uint32_t Pattern[] = {0x400040, 0x800080, 0xC000C0, 0xFF00FF};
 //uint32_t Pattern[] = {0x000000, 0xFFFFFF};
 uint32_t Pattern[] = {0x000000, 0x010001, 0x100010, 0x200020, 0x400040, 0x800080, 0xC000C0, 0xFF00FF, 0xFF00FF, 0xFF00FF,
@@ -404,12 +472,18 @@ TRandomShifterActor RandomShifterActor;
 uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF};
 TRandomSelectorShifterActor<decltype(Colors)> RandomSelectorShifterActor(Colors);
 TRandomSelectorSmoothShifterActor<decltype(Colors)> RandomSelectorSmoothShifterActor(Colors);
+uint32_t WhiteColor[] = {0xFFFFFF};
+TDecayingSplashesActor<decltype(WhiteColor)> DecayingSplashesActor(1, 5, WhiteColor);
+uint32_t RainbowColors[] = {0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x2E2B5F, 0x8B00FF};
+TProportionalColorsActor<decltype(RainbowColors)> ProportionalColorsActor(RainbowColors);
 
 void loop() {
     //RandomSelectorSmoothShifterActor.Move(Strip);
     //PatternActor.Move(Strip);
     //ChaoticPatternMovementActor.Move(Strip);
     //ChaoticPatternMovementWithRandomTrailActor.Move(Strip);
-    PatternActor.Move(Strip);
+    //PatternActor.Move(Strip);
+    //DecayingSplashesActor.Move(Strip);
+    ProportionalColorsActor.Move(Strip);
     Strip.show();
 }
