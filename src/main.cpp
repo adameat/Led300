@@ -1,17 +1,20 @@
 #define PIN 5
 #define NUM_LEDS 300
 #include <Adafruit_NeoPixel_ZeroDMA.h>
+//#include <Adafruit_NeoPixel.h>
 #include "sprite.h"
 
-Adafruit_NeoPixel_ZeroDMA Strip(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
 using TStripType = Adafruit_NeoPixel_ZeroDMA;
+//using TStripType = Adafruit_NeoPixel;
+TStripType Strip(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
 
 template <typename T, const unsigned int N>
 constexpr unsigned int countof(T (&)[N]) { return N; }
 
 void setup() {
+    SerialUSB.begin(9600);
     Strip.begin();
-    Strip.setBrightness(255);
+    Strip.setBrightness(50);
 }
 
 class TActor {
@@ -30,6 +33,10 @@ public:
     void UpdateTime() {
         LastDrawTime = millis();
     }
+
+    void PostponeTime(uint32_t ahead) {
+        LastDrawTime = millis() + ahead;
+    }
 };
 
 union TColorRGB {
@@ -44,7 +51,7 @@ union TColorRGB {
 class TColorSmoother {
 public:
     static uint32_t MergeColors(uint32_t a, uint32_t b, float amount_b) {
-        float amount_a = 1 - amount_b;
+        float amount_a = 1 - min(amount_b, 1);
         TColorRGB _a;
         TColorRGB _b;
         TColorRGB _r;
@@ -52,9 +59,9 @@ public:
         _a.Value = a;
         _b.Value = b;
         _r.Value = 0;
-        _r.R = int(_a.R * amount_a) + int(_b.R * amount_b);
-        _r.G = int(_a.G * amount_a) + int(_b.G * amount_b);
-        _r.B = int(_a.B * amount_a) + int(_b.B * amount_b);
+        _r.R = min(round(_a.R * amount_a) + round(_b.R * amount_b), 255);
+        _r.G = min(round(_a.G * amount_a) + round(_b.G * amount_b), 255);
+        _r.B = min(round(_a.B * amount_a) + round(_b.B * amount_b), 255);
         return _r.Value;
     }
 
@@ -412,7 +419,7 @@ public:
     TRandomSmoothBlenderActor(const ColorsType& colors, TStripType& strip)
         : Colors(colors)
     {
-        Period = 50;
+        Period = 100;
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
             Pixels[i] = strip.getPixelColor(i);
             PixelsDesired[i] = Colors[random(countof(Colors))];
@@ -430,21 +437,57 @@ public:
         if (IsTime()) {
             Shift = (Shift + 1) % MAX_SHIFT;
             if (Shift == 0) {
-                int choice = random(10);
-                if (choice == 0) {
-                    uint32_t color = Colors[random(countof(Colors))];
-                    for (unsigned int i = 0; i < NUM_LEDS; ++i) {
-                        Pixels[i] = PixelsDesired[i];
-                        PixelsDesired[i] = color;
-                    }
-                } else {
-                    for (unsigned int i = 0; i < NUM_LEDS; ++i) {
-                        Pixels[i] = PixelsDesired[i];
-                        PixelsDesired[i] = Colors[random(countof(Colors))];
-                    }
+                for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+                    Pixels[i] = PixelsDesired[i];
+                    PixelsDesired[i] = Colors[random(countof(Colors))];
                 }
             }
             UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    const ColorsType& Colors;
+};
+
+template <typename ColorsType>
+class TSingleRandomSmoothBlenderActor : public TActor, TColorSmoother {
+    uint32_t Pixels[NUM_LEDS];
+    uint32_t ColorDesired;
+    static constexpr int MAX_SHIFT = 250;
+    int Shift = 0;
+
+public:
+    TSingleRandomSmoothBlenderActor(const ColorsType& colors, TStripType& strip)
+        : Colors(colors)
+    {
+        Period = 50;
+        ColorDesired = Colors[random(countof(Colors))];
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            Pixels[i] = strip.getPixelColor(i);
+        }
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        float trans = float(Shift) / (MAX_SHIFT - 1);
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            strip.setPixelColor(i, MergeColors(Pixels[i], ColorDesired, trans));
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            Shift = (Shift + 1) % MAX_SHIFT;
+            if (Shift == 0) {
+                for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+                    Pixels[i] = ColorDesired;
+                }
+                ColorDesired = Colors[random(countof(Colors))];
+                PostponeTime(5000);
+            } else {
+                UpdateTime();
+            }
         }
         Draw(strip);
     }
@@ -492,8 +535,33 @@ protected:
     const ColorsType& Colors;
 };
 
+class TSingleColorActor : public TActor, TColorSmoother {
+public:
+    TSingleColorActor(uint32_t color)
+        : Color(color)
+    {
+        Period = 1000;
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            strip.setPixelColor(i, Color);
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    uint32_t Color;
+};
+
 template <typename ColorsType>
-class TProportionalColorsActor : TActor, TColorSmoother {
+class TProportionalColorsActor : public TActor, TColorSmoother {
 public:
     TProportionalColorsActor(const ColorsType& colors)
         : Colors(colors)
@@ -502,10 +570,16 @@ public:
     }
 
     virtual void Draw(TStripType& strip) override {
-        float colorSize = float(NUM_LEDS) / (countof(Colors) - 1);
-        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
-            unsigned int colorIndex = i / colorSize;
-            strip.setPixelColor(i, MergeColors(Colors[colorIndex], Colors[colorIndex + 1], (i - colorSize * colorIndex) / colorSize));
+        if (countof(Colors) > 1) {
+            float colorSize = float(NUM_LEDS) / (countof(Colors) - 1);
+            for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+                unsigned int colorIndex = i / colorSize;
+                strip.setPixelColor(i, MergeColors(Colors[colorIndex], Colors[colorIndex + 1], (i - colorSize * colorIndex) / colorSize));
+            }
+        } else {
+            for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+                strip.setPixelColor(i, Colors[0]);
+            }
         }
     }
 
@@ -602,20 +676,31 @@ TActor* CurrentActor = nullptr;
 uint32_t StrategyStartTime = 0;
 static constexpr uint32_t STRATEGY_TIME = 60000;
 decltype(Pattern) PatternCopy;
+uint32_t SingleColor[1];
+int Strategy = -1;
 
 uint32_t last = 0;
 void loop() {
     unsigned long now = millis();
     if (now > StrategyStartTime + STRATEGY_TIME || CurrentActor == nullptr) {
-        int choice = random(3);
+        int choice;
+        do {
+            choice = random(4);
+        } while (choice == Strategy);
+        SerialUSB.print("Switching to strategy ");
+        SerialUSB.println(choice);
+        Strategy = choice;
         delete CurrentActor;
-        switch(choice) {
+        switch(Strategy) {
             case 0:
                 TColorSmoother::MaskPattern(Pattern, PatternCopy, Colors[random(countof(Colors))]);
                 CurrentActor = new TPatternActor<decltype(PatternCopy)>(PatternCopy, 1, true, 40);
                 break;
             case 1:
                 CurrentActor = new TRandomSmoothBlenderActor<decltype(Colors)>(Colors, Strip);
+                break;
+            case 2:
+                CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(Colors)>(Colors, Strip);
                 break;
             default:
                 CurrentActor = new TRandomSelectorSmoothShifterActor<decltype(Colors)>(Colors);
@@ -635,4 +720,77 @@ void loop() {
     //ProportionalColorsActor.Move(Strip);
     //AnimationActor.Move(Strip);
     Strip.show();
+    if (SerialUSB.available()) {
+        auto cmd = SerialUSB.read();
+        switch (cmd) {
+        case 'p': {
+            for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+                int32_t color = Strip.getPixelColor(i);
+                SerialUSB.print(color, HEX);
+                if (i % 16 == 15) {
+                    SerialUSB.println();
+                } else {
+                    SerialUSB.print(' ');
+                }
+            }
+            SerialUSB.println();
+            break;
+        }
+        case 'r':
+            SerialUSB.println("red");
+            delete CurrentActor;
+            SingleColor[0] = 0xFF0000;
+            CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
+            break;
+        case 'g':
+            SerialUSB.println("green");
+            delete CurrentActor;
+            SingleColor[0] = 0x00FF00;
+            CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
+            break;
+        case 'b':
+            SerialUSB.println("blue");
+            delete CurrentActor;
+            SingleColor[0] = 0x0000FF;
+            CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
+            break;
+        case 'w':
+            SerialUSB.println("white");
+            delete CurrentActor;
+            SingleColor[0] = 0xFFFFFF;
+            CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
+            break;
+        case 'i':
+            SerialUSB.println("pink");
+            delete CurrentActor;
+            SingleColor[0] = 0xFFC0CB;
+            CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
+            break;
+        case 'W':
+            SerialUSB.println("WHITE");
+            delete CurrentActor;
+            CurrentActor = new TSingleColorActor(0xFFFFFF);
+            break;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9': {
+            int brightness = (cmd - '0') * 255 / 9;
+            SerialUSB.print("Setting brightness to ");
+            SerialUSB.println(brightness);
+            Strip.setBrightness(brightness);
+            break;   
+        }
+        default:
+            SerialUSB.println("Unknown command");
+            break;
+        }
+        StrategyStartTime = now;
+    }
 }
