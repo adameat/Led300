@@ -1,17 +1,17 @@
-#define PIN 6
+#define PIN 5
 #define NUM_LEDS 300
-#include "Adafruit_NeoPixel.h"
+#include <Adafruit_NeoPixel_ZeroDMA.h>
 #include "sprite.h"
 
-Adafruit_NeoPixel Strip(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
-using TStripType = Adafruit_NeoPixel;
+Adafruit_NeoPixel_ZeroDMA Strip(NUM_LEDS, PIN, NEO_GRB + NEO_KHZ800);
+using TStripType = Adafruit_NeoPixel_ZeroDMA;
 
 template <typename T, const unsigned int N>
 constexpr unsigned int countof(T (&)[N]) { return N; }
 
 void setup() {
     Strip.begin();
-    Strip.setBrightness(50);
+    Strip.setBrightness(255);
 }
 
 class TActor {
@@ -19,6 +19,7 @@ public:
     unsigned long Period = 1000; // ms
     unsigned long LastDrawTime = 0;
 
+    virtual ~TActor() = default;
     virtual void Draw(TStripType&) = 0;
     virtual void Move(TStripType&) = 0;
 
@@ -64,10 +65,17 @@ public:
             strip.setPixelColor(i, MergeColors(pixelsDesired[i], pixelsDesired[i - 1], trans));
         }
     }
+
+    template <typename PatternType>
+    static void MaskPattern(const PatternType& patternSource, PatternType& patternTarget, uint32_t mask) {
+        for (unsigned int i = 0; i < countof(patternSource); ++i) {
+            patternTarget[i] = patternSource[i] & mask;
+        }
+    }
 };
 
 template <typename PatternType>
-class TPatternActor : TActor {
+class TPatternActor : public TActor {
 public:
     TPatternActor(const PatternType& pattern, int step = 1, bool repeat = false, int space = 0)
         : Pattern(pattern)
@@ -75,7 +83,7 @@ public:
         , Repeat(repeat)
         , Space(space)
     {
-        Period = 5;
+        Period = 50;
     }
 
     virtual void Draw(TStripType& strip) override {
@@ -111,7 +119,7 @@ protected:
 };
 
 template <typename PatternType>
-class TSmoothPatternActor : TActor, TColorSmoother {
+class TSmoothPatternActor : public TActor, TColorSmoother {
 public:
     static constexpr int SMOOTH_LEVEL = 20;
 
@@ -157,7 +165,7 @@ protected:
 };
 
 template <typename PatternType>
-class TChaoticPatternMovementActor : TActor {
+class TChaoticPatternMovementActor : public TActor {
 public:
     TChaoticPatternMovementActor(const PatternType& pattern)
         : Pattern(pattern)
@@ -200,7 +208,7 @@ protected:
 };
 
 template <typename PatternType>
-class TChaoticPatternMovementWithRandomTrailActor : TActor {
+class TChaoticPatternMovementWithRandomTrailActor : public TActor {
 public:
     TChaoticPatternMovementWithRandomTrailActor(const PatternType& pattern)
         : Pattern(pattern)
@@ -254,7 +262,7 @@ protected:
     uint32_t Trail = 0;
 };
 
-class TRandomFillActor : TActor {
+class TRandomFillActor : public TActor {
     uint32_t Pixels[NUM_LEDS];
 
 public:
@@ -285,7 +293,7 @@ public:
     }
 };
 
-class TRandomShifterActor : TActor {
+class TRandomShifterActor : public TActor {
     uint32_t Pixels[NUM_LEDS];
 
 public:
@@ -318,14 +326,17 @@ public:
 };
 
 template <typename ColorsType>
-class TRandomSelectorShifterActor : TActor {
+class TRandomSelectorShifterActor : public TActor {
     uint32_t Pixels[NUM_LEDS];
 
 public:
     TRandomSelectorShifterActor(const ColorsType& colors)
         : Colors(colors)
     {
-        Period = 50;
+        Period = 10;
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            Pixels[i] = Colors[random(countof(Colors))];
+        }
     }
 
     virtual void Draw(TStripType& strip) override {
@@ -336,10 +347,11 @@ public:
 
     virtual void Move(TStripType& strip) override {
         if (IsTime()) {
+            auto s = Pixels[NUM_LEDS - 1];
             for (unsigned int i = NUM_LEDS - 1; i > 0; --i) {
                 Pixels[i] = Pixels[i - 1];
             }
-            Pixels[0] = Colors[random(countof(Colors))];
+            Pixels[0] = s;
             UpdateTime();
         }
         Draw(strip);
@@ -350,16 +362,16 @@ protected:
 };
 
 template <typename ColorsType>
-class TRandomSelectorSmoothShifterActor : TActor, TColorSmoother {
+class TRandomSelectorSmoothShifterActor : public TActor, TColorSmoother {
     uint32_t PixelsDesired[NUM_LEDS];
-    static constexpr int MAX_SHIFT = 20;
+    static constexpr int MAX_SHIFT = 10;
     int Shift = 0;
 
 public:
     TRandomSelectorSmoothShifterActor(const ColorsType& colors)
         : Colors(colors)
     {
-        Period = 10;
+        Period = 50;
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
             PixelsDesired[i] = Colors[random(countof(Colors))];
         }
@@ -379,6 +391,58 @@ public:
                     PixelsDesired[i] = PixelsDesired[i - 1];
                 }
                 PixelsDesired[0] = s;
+            }
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    const ColorsType& Colors;
+};
+
+template <typename ColorsType>
+class TRandomSmoothBlenderActor : public TActor, TColorSmoother {
+    uint32_t Pixels[NUM_LEDS];
+    uint32_t PixelsDesired[NUM_LEDS];
+    static constexpr int MAX_SHIFT = 50;
+    int Shift = 0;
+
+public:
+    TRandomSmoothBlenderActor(const ColorsType& colors, TStripType& strip)
+        : Colors(colors)
+    {
+        Period = 50;
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            Pixels[i] = strip.getPixelColor(i);
+            PixelsDesired[i] = Colors[random(countof(Colors))];
+        }
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        float trans = float(Shift) / MAX_SHIFT;
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            strip.setPixelColor(i, MergeColors(Pixels[i], PixelsDesired[i], trans));
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            Shift = (Shift + 1) % MAX_SHIFT;
+            if (Shift == 0) {
+                int choice = random(10);
+                if (choice == 0) {
+                    uint32_t color = Colors[random(countof(Colors))];
+                    for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+                        Pixels[i] = PixelsDesired[i];
+                        PixelsDesired[i] = color;
+                    }
+                } else {
+                    for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+                        Pixels[i] = PixelsDesired[i];
+                        PixelsDesired[i] = Colors[random(countof(Colors))];
+                    }
+                }
             }
             UpdateTime();
         }
@@ -497,12 +561,12 @@ protected:
 
 //uint32_t Pattern[] = {0x400040, 0x800080, 0xC000C0, 0xFF00FF};
 //uint32_t Pattern[] = {0x000000, 0xFFFFFF};
-uint32_t Pattern[] = {0x000000, 0x010001, 0x100010, 0x200020, 0x400040, 0x800080, 0xC000C0, 0xFF00FF, 0xFF00FF, 0xFF00FF,
-                      0xFF00FF, 0xFF00FF, 0xFF00FF, 0xC000C0, 0x800080, 0x400040, 0x200020, 0x100010, 0x010001, 0x000000};
+uint32_t Pattern[] = {0x000000, 0x010101, 0x101010, 0x202020, 0x404040, 0x808080, 0xC0C0C0, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF,
+                      0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xC0C0C0, 0x808080, 0x404040, 0x202020, 0x101010, 0x010101, 0x000000};
 uint32_t ChaoticPattern[] = {0x000000, 0x010101, 0x101010, 0x404040, 0x101010, 0x010101, 0x000000};
 
 //uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF};
-uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF};
+uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFC0CB};
 uint32_t WhiteColor[] = {0xFFFFFF};
 uint32_t RainbowColors[] = {0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x2E2B5F, 0x8B00FF};
 
@@ -521,7 +585,7 @@ TAnimation<10, 9> Animation1 = {
     }
 };
 
-TPatternActor<decltype(Pattern)> PatternActor(Pattern, 1, true, 40);
+/*TPatternActor<decltype(Pattern)> PatternActor(Pattern, 1, true, 40);
 TSmoothPatternActor<decltype(Pattern)> SmoothPatternActor(Pattern, true);
 TChaoticPatternMovementActor<decltype(ChaoticPattern)> ChaoticPatternMovementActor(ChaoticPattern);
 TChaoticPatternMovementWithRandomTrailActor<decltype(ChaoticPattern)> ChaoticPatternMovementWithRandomTrailActor(ChaoticPattern);
@@ -529,11 +593,39 @@ TRandomFillActor RandomFillActor;
 TRandomShifterActor RandomShifterActor;
 TRandomSelectorShifterActor<decltype(Colors)> RandomSelectorShifterActor(Colors);
 TRandomSelectorSmoothShifterActor<decltype(Colors)> RandomSelectorSmoothShifterActor(Colors);
+TRandomSmoothBlenderActor<decltype(Colors)> RandomSmoothBlenderActor(Colors);
 TDecayingSplashesActor<decltype(WhiteColor)> DecayingSplashesActor(1, 5, WhiteColor);
 TProportionalColorsActor<decltype(RainbowColors)> ProportionalColorsActor(RainbowColors);
-TAnimationActor<decltype(Animation1), 10> AnimationActor(Animation1);
+TAnimationActor<decltype(Animation1), 10> AnimationActor(Animation1);*/
 
+TActor* CurrentActor = nullptr;
+uint32_t StrategyStartTime = 0;
+static constexpr uint32_t STRATEGY_TIME = 60000;
+decltype(Pattern) PatternCopy;
+
+uint32_t last = 0;
 void loop() {
+    unsigned long now = millis();
+    if (now > StrategyStartTime + STRATEGY_TIME || CurrentActor == nullptr) {
+        int choice = random(3);
+        delete CurrentActor;
+        switch(choice) {
+            case 0:
+                TColorSmoother::MaskPattern(Pattern, PatternCopy, Colors[random(countof(Colors))]);
+                CurrentActor = new TPatternActor<decltype(PatternCopy)>(PatternCopy, 1, true, 40);
+                break;
+            case 1:
+                CurrentActor = new TRandomSmoothBlenderActor<decltype(Colors)>(Colors, Strip);
+                break;
+            default:
+                CurrentActor = new TRandomSelectorSmoothShifterActor<decltype(Colors)>(Colors);
+                break;
+        }
+        StrategyStartTime = now;
+    }
+    CurrentActor->Move(Strip);
+    //RandomSmoothBlenderActor.Move(Strip);
+    //RandomSelectorShifterActor.Move(Strip);
     //RandomSelectorSmoothShifterActor.Move(Strip);
     //PatternActor.Move(Strip);
     //ChaoticPatternMovementActor.Move(Strip);
@@ -541,6 +633,6 @@ void loop() {
     //PatternActor.Move(Strip);
     //DecayingSplashesActor.Move(Strip);
     //ProportionalColorsActor.Move(Strip);
-    AnimationActor.Move(Strip);
+    //AnimationActor.Move(Strip);
     Strip.show();
 }
