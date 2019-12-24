@@ -378,7 +378,7 @@ public:
     TRandomSelectorSmoothShifterActor(const ColorsType& colors)
         : Colors(colors)
     {
-        Period = 50;
+        Period = 10;
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
             PixelsDesired[i] = Colors[random(countof(Colors))];
         }
@@ -462,7 +462,7 @@ public:
     TSingleRandomSmoothBlenderActor(const ColorsType& colors, TStripType& strip)
         : Colors(colors)
     {
-        Period = 50;
+        Period = 10;
         ColorDesired = Colors[random(countof(Colors))];
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
             Pixels[i] = strip.getPixelColor(i);
@@ -484,7 +484,7 @@ public:
                     Pixels[i] = ColorDesired;
                 }
                 ColorDesired = Colors[random(countof(Colors))];
-                PostponeTime(5000);
+                PostponeTime(10000);
             } else {
                 UpdateTime();
             }
@@ -497,14 +497,17 @@ protected:
 };
 
 template <typename ColorsType>
-class TDecayingSplashesActor : TActor {
+class TDecayingSplashesActor : public TActor {
 public:
-    TDecayingSplashesActor(int amount, int speed, const ColorsType& colors)
+    TDecayingSplashesActor(int amount, int speed, const ColorsType& colors, TStripType& strip)
         : Amount(amount)
         , Speed(speed)
         , Colors(colors)
     {
         Period = 5;
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            PixelsDesired[i].Value = strip.getPixelColor(i);
+        }
     }
 
     virtual void Draw(TStripType& strip) override {
@@ -557,6 +560,41 @@ public:
     }
 
 protected:
+    uint32_t Color;
+};
+
+template <typename ColorsType>
+class TShiftRandomColorsActor : public TActor, TColorSmoother {
+public:
+    TShiftRandomColorsActor(const ColorsType& colors)
+        : Colors(colors)
+    {
+        Period = 50;
+        Color = Colors[random(countof(colors))];
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        for (int i = Pos; i < NUM_LEDS; i += Distance) {
+            strip.setPixelColor(i, Color);
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            ++Pos;
+            if (Pos >= Distance) {
+                Pos = 0;
+                Color = Colors[random(countof(Colors))];
+            }
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    const ColorsType& Colors;
+    int Pos = 0;
+    int Distance = 20;
     uint32_t Color;
 };
 
@@ -640,7 +678,7 @@ uint32_t Pattern[] = {0x000000, 0x010101, 0x101010, 0x202020, 0x404040, 0x808080
 uint32_t ChaoticPattern[] = {0x000000, 0x010101, 0x101010, 0x404040, 0x101010, 0x010101, 0x000000};
 
 //uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF};
-uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, 0xFFC0CB};
+uint32_t Colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00, 0x00FFFF, 0xFF00FF, /*pink*/0xFFC0CB, /*orange*/0xFFA500};
 uint32_t WhiteColor[] = {0xFFFFFF};
 uint32_t RainbowColors[] = {0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x2E2B5F, 0x8B00FF};
 
@@ -685,7 +723,7 @@ void loop() {
     if (now > StrategyStartTime + STRATEGY_TIME || CurrentActor == nullptr) {
         int choice;
         do {
-            choice = random(4);
+            choice = random(6);
         } while (choice == Strategy);
         SerialUSB.print("Switching to strategy ");
         SerialUSB.println(choice);
@@ -697,10 +735,17 @@ void loop() {
                 CurrentActor = new TPatternActor<decltype(PatternCopy)>(PatternCopy, 1, true, 40);
                 break;
             case 1:
-                CurrentActor = new TRandomSmoothBlenderActor<decltype(Colors)>(Colors, Strip);
+                CurrentActor = new TDecayingSplashesActor<decltype(Colors)>(1, 5, Colors, Strip);
                 break;
             case 2:
+                SingleColor[0] = Colors[random(countof(Colors))];
+                CurrentActor = new TDecayingSplashesActor<decltype(SingleColor)>(1, 5, SingleColor, Strip);
+                break;
+            case 3:
                 CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(Colors)>(Colors, Strip);
+                break;
+            case 4:
+                CurrentActor = new TShiftRandomColorsActor<decltype(Colors)>(Colors);
                 break;
             default:
                 CurrentActor = new TRandomSelectorSmoothShifterActor<decltype(Colors)>(Colors);
@@ -770,6 +815,10 @@ void loop() {
             SerialUSB.println("WHITE");
             delete CurrentActor;
             CurrentActor = new TSingleColorActor(0xFFFFFF);
+            break;
+        case 'n':
+            delete CurrentActor;
+            CurrentActor = nullptr;
             break;
         case '0':
         case '1':
