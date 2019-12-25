@@ -81,6 +81,25 @@ public:
     }
 };
 
+template <typename T, int S>
+T GetRandom(const T(&choices)[S]) {
+    return choices[random(S)];
+}
+
+template <typename T, int S>
+void MakeRandom(T& result, const T(&choices)[S]) {
+    T r;
+    do {
+        r = GetRandom<T, S>(choices);
+    } while (result == r);
+    result = r;
+}
+
+template <typename T>
+void MakeRandom(T& result, const T(&choices)[1]) {
+    result = choices[0];
+}
+
 template <typename PatternType>
 class TPatternActor : public TActor {
 public:
@@ -342,7 +361,7 @@ public:
     {
         Period = 10;
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
-            Pixels[i] = Colors[random(countof(Colors))];
+            Pixels[i] = GetRandom(Colors);
         }
     }
 
@@ -380,7 +399,7 @@ public:
     {
         Period = 10;
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
-            PixelsDesired[i] = Colors[random(countof(Colors))];
+            PixelsDesired[i] = GetRandom(Colors);
         }
     }
 
@@ -422,7 +441,7 @@ public:
         Period = 100;
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
             Pixels[i] = strip.getPixelColor(i);
-            PixelsDesired[i] = Colors[random(countof(Colors))];
+            PixelsDesired[i] = GetRandom(Colors);
         }
     }
 
@@ -439,7 +458,7 @@ public:
             if (Shift == 0) {
                 for (unsigned int i = 0; i < NUM_LEDS; ++i) {
                     Pixels[i] = PixelsDesired[i];
-                    PixelsDesired[i] = Colors[random(countof(Colors))];
+                    PixelsDesired[i] = GetRandom(Colors);
                 }
             }
             UpdateTime();
@@ -463,7 +482,7 @@ public:
         : Colors(colors)
     {
         Period = 10;
-        ColorDesired = Colors[random(countof(Colors))];
+        ColorDesired = GetRandom(Colors);
         for (unsigned int i = 0; i < NUM_LEDS; ++i) {
             Pixels[i] = strip.getPixelColor(i);
         }
@@ -483,7 +502,7 @@ public:
                 for (unsigned int i = 0; i < NUM_LEDS; ++i) {
                     Pixels[i] = ColorDesired;
                 }
-                ColorDesired = Colors[random(countof(Colors))];
+                MakeRandom(ColorDesired, Colors);
                 PostponeTime(10000);
             } else {
                 UpdateTime();
@@ -524,7 +543,7 @@ public:
                 PixelsDesired[i].B -= min(PixelsDesired[i].B, Speed);
             }
             for (int i = 0; i < Amount; ++i) {
-                PixelsDesired[random(NUM_LEDS)].Value = Colors[random(countof(Colors))];
+                PixelsDesired[random(NUM_LEDS)].Value = GetRandom(Colors);
             }
             UpdateTime();
         }
@@ -570,7 +589,7 @@ public:
         : Colors(colors)
     {
         Period = 50;
-        Color = Colors[random(countof(colors))];
+        Color = GetRandom(Colors);
     }
 
     virtual void Draw(TStripType& strip) override {
@@ -584,7 +603,7 @@ public:
             ++Pos;
             if (Pos >= Distance) {
                 Pos = 0;
-                Color = Colors[random(countof(Colors))];
+                MakeRandom(Color, Colors);
             }
             UpdateTime();
         }
@@ -712,7 +731,7 @@ TAnimationActor<decltype(Animation1), 10> AnimationActor(Animation1);*/
 
 TActor* CurrentActor = nullptr;
 uint32_t StrategyStartTime = 0;
-static constexpr uint32_t STRATEGY_TIME = 60000;
+static constexpr uint32_t STRATEGY_TIME = 30000;
 decltype(Pattern) PatternCopy;
 uint32_t SingleColor[1];
 int Strategy = -1;
@@ -731,14 +750,14 @@ void loop() {
         delete CurrentActor;
         switch(Strategy) {
             case 0:
-                TColorSmoother::MaskPattern(Pattern, PatternCopy, Colors[random(countof(Colors))]);
+                TColorSmoother::MaskPattern(Pattern, PatternCopy, GetRandom(Colors));
                 CurrentActor = new TPatternActor<decltype(PatternCopy)>(PatternCopy, 1, true, 40);
                 break;
             case 1:
                 CurrentActor = new TDecayingSplashesActor<decltype(Colors)>(1, 5, Colors, Strip);
                 break;
             case 2:
-                SingleColor[0] = Colors[random(countof(Colors))];
+                MakeRandom(SingleColor[0], Colors);
                 CurrentActor = new TDecayingSplashesActor<decltype(SingleColor)>(1, 5, SingleColor, Strip);
                 break;
             case 3:
