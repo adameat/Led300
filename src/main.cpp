@@ -593,8 +593,12 @@ public:
     }
 
     virtual void Draw(TStripType& strip) override {
-        for (int i = Pos; i < NUM_LEDS; i += Distance) {
-            strip.setPixelColor(i, Color);
+        for (int i = 0; i < NUM_LEDS; i += Distance) {
+            if (Pos % 2 == 0) {
+                strip.setPixelColor(i + Distance / 2 + Pos, Color);
+            } else {
+                strip.setPixelColor(i + Distance / 2 - Pos, Color);
+            }
         }
     }
 
@@ -613,7 +617,7 @@ public:
 protected:
     const ColorsType& Colors;
     int Pos = 0;
-    int Distance = 20;
+    int Distance = 50;
     uint32_t Color;
 };
 
