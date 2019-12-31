@@ -595,14 +595,15 @@ public:
     virtual void Draw(TStripType& strip) override {
         for (int i = 0; i < NUM_LEDS; i += Distance) {
             if (Pos % 2 == 0) {
-                strip.setPixelColor(i + Distance / 2 + Pos, Color);
+                strip.setPixelColor(i + Distance / 2 + Pos / 2, Color);
             } else {
-                strip.setPixelColor(i + Distance / 2 - Pos, Color);
+                strip.setPixelColor(i + Distance / 2 - Pos / 2 - 1, Color);
             }
         }
     }
 
     virtual void Move(TStripType& strip) override {
+        Draw(strip);
         if (IsTime()) {
             ++Pos;
             if (Pos >= Distance) {
@@ -611,7 +612,6 @@ public:
             }
             UpdateTime();
         }
-        Draw(strip);
     }
 
 protected:
