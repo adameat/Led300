@@ -74,9 +74,17 @@ public:
     }
 
     template <typename PatternType>
-    static void MaskPattern(const PatternType& patternSource, PatternType& patternTarget, uint32_t mask) {
+    static void MaskPattern(const PatternType& patternSource, PatternType& patternTarget, uint32_t patternMask) {
+        TColorRGB mask;
+        mask.Value = patternMask;
         for (unsigned int i = 0; i < countof(patternSource); ++i) {
-            patternTarget[i] = patternSource[i] & mask;
+            TColorRGB target;
+            TColorRGB source;
+            source.Value = patternSource[i];
+            target.R = source.R * mask.R / 255;
+            target.G = source.G * mask.G / 255;
+            target.B = source.B * mask.B / 255;
+            patternTarget[i] = target.Value;
         }
     }
 };
@@ -515,6 +523,29 @@ protected:
     const ColorsType& Colors;
 };
 
+class TSingleColorGradientActor : public TActor, TColorSmoother {
+    uint32_t ColorDesired;
+
+public:
+    TSingleColorGradientActor(uint32_t color)
+        : ColorDesired(color)
+    {
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            strip.setPixelColor(i, MergeColors(0, ColorDesired, float(i) / NUM_LEDS));
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+};
+
 template <typename ColorsType>
 class TDecayingSplashesActor : public TActor {
 public:
@@ -834,10 +865,30 @@ void loop() {
             SingleColor[0] = 0xFFC0CB;
             CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
             break;
+        case 'R':
+            SerialUSB.println("RED");
+            delete CurrentActor;
+            CurrentActor = new TSingleColorGradientActor(0xFF0000);
+            break;
+        case 'G':
+            SerialUSB.println("GREEN");
+            delete CurrentActor;
+            CurrentActor = new TSingleColorGradientActor(0x00FF00);
+            break;
+        case 'B':
+            SerialUSB.println("BLUE");
+            delete CurrentActor;
+            CurrentActor = new TSingleColorGradientActor(0x0000FF);
+            break;
         case 'W':
             SerialUSB.println("WHITE");
             delete CurrentActor;
-            CurrentActor = new TSingleColorActor(0xFFFFFF);
+            CurrentActor = new TSingleColorGradientActor(0xFFFFFF);
+            break;
+        case 'I':
+            SerialUSB.println("PINK");
+            delete CurrentActor;
+            CurrentActor = new TSingleColorGradientActor(0xFFC0CB);
             break;
         case 'n':
             delete CurrentActor;
