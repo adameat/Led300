@@ -13,6 +13,7 @@ constexpr unsigned int countof(T (&)[N]) { return N; }
 
 void setup() {
     SerialUSB.begin(9600);
+    Serial1.begin(9600);
     Strip.begin();
     Strip.setBrightness(50);
 }
@@ -479,6 +480,55 @@ protected:
 };
 
 template <typename ColorsType>
+class TRandomFastBlenderActor : public TActor, TColorSmoother {
+    uint32_t Pixels[NUM_LEDS];
+    uint32_t StartingColor;
+    uint32_t DesiredColor;
+    static constexpr int MAX_SHIFT = 50;
+    int Shift = 0;
+
+public:
+    TRandomFastBlenderActor(const ColorsType& colors, TStripType& strip)
+        : Colors(colors)
+    {
+        Period = 10;
+        DesiredColor = GetRandom(Colors);
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            Pixels[i] = strip.getPixelColor(i);
+        }
+        StartingColor = Pixels[0];
+    }
+
+    virtual void Draw(TStripType& strip) override {
+        for (unsigned int i = 0; i < NUM_LEDS; ++i) {
+            strip.setPixelColor(i, Pixels[i]);
+        }
+    }
+
+    virtual void Move(TStripType& strip) override {
+        if (IsTime()) {
+            for (unsigned int i = NUM_LEDS - 1; i > 0; --i) {
+                Pixels[i] = Pixels[i - 1];
+            }
+            Shift = (Shift + 1) % MAX_SHIFT;
+            if (Shift == 0) {
+                Pixels[0] = StartingColor = DesiredColor;
+                MakeRandom(DesiredColor, Colors);
+            } else {
+                float trans = float(Shift) / MAX_SHIFT;
+                Pixels[0] = MergeColors(StartingColor, DesiredColor, trans);
+            }
+            
+            UpdateTime();
+        }
+        Draw(strip);
+    }
+
+protected:
+    const ColorsType& Colors;
+};
+
+template <typename ColorsType>
 class TSingleRandomSmoothBlenderActor : public TActor, TColorSmoother {
     uint32_t Pixels[NUM_LEDS];
     uint32_t ColorDesired;
@@ -725,6 +775,22 @@ protected:
     int AnimationNum = 0;
 };
 
+unsigned long from_hex(String str) {
+    unsigned long v = 0;
+    for (unsigned int i = 0; i < str.length(); ++i) {
+        unsigned long l = 0;
+        char c = str[i];
+        if (c >= '0' && c <= '9') {
+            l = c - '0';
+        } else if (c >= 'A' && c <= 'F') {
+            l = c - 'A' + 0xA;
+        }
+        v <<= 4;
+        v |= l;
+    }
+    return v;
+}
+
 //uint32_t Pattern[] = {0x400040, 0x800080, 0xC000C0, 0xFF00FF};
 //uint32_t Pattern[] = {0x000000, 0xFFFFFF};
 uint32_t Pattern[] = {0x000000, 0x010101, 0x101010, 0x202020, 0x404040, 0x808080, 0xC0C0C0, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF,
@@ -766,18 +832,20 @@ TAnimationActor<decltype(Animation1), 10> AnimationActor(Animation1);*/
 
 TActor* CurrentActor = nullptr;
 uint32_t StrategyStartTime = 0;
-static constexpr uint32_t STRATEGY_TIME = 30000;
+static constexpr uint32_t STRATEGY_TIME = 60000;
 decltype(Pattern) PatternCopy;
 uint32_t SingleColor[1];
 int Strategy = -1;
-
 uint32_t last = 0;
+String cmd;
+bool lock = false;
+
 void loop() {
     unsigned long now = millis();
-    if (now > StrategyStartTime + STRATEGY_TIME || CurrentActor == nullptr) {
+    if ((now > StrategyStartTime + STRATEGY_TIME || CurrentActor == nullptr) && !lock) {
         int choice;
         do {
-            choice = random(6);
+            choice = random(7);
         } while (choice == Strategy);
         SerialUSB.print("Switching to strategy ");
         SerialUSB.println(choice);
@@ -801,10 +869,14 @@ void loop() {
             case 4:
                 CurrentActor = new TShiftRandomColorsActor<decltype(Colors)>(Colors);
                 break;
+            case 5:
+                CurrentActor = new TRandomFastBlenderActor<decltype(Colors)>(Colors, Strip);
+                break;
             default:
                 CurrentActor = new TRandomSelectorSmoothShifterActor<decltype(Colors)>(Colors);
                 break;
         }
+        
         StrategyStartTime = now;
     }
     CurrentActor->Move(Strip);
@@ -819,10 +891,28 @@ void loop() {
     //ProportionalColorsActor.Move(Strip);
     //AnimationActor.Move(Strip);
     Strip.show();
-    if (SerialUSB.available()) {
-        auto cmd = SerialUSB.read();
-        switch (cmd) {
-        case 'p': {
+    while (SerialUSB.available()) {
+        cmd += char(SerialUSB.read());
+        if (cmd.endsWith("\n")) {
+            break;
+        }
+    }
+    if (Serial1.available()) {
+        while (Serial1.available()) {
+            cmd += char(Serial1.read());
+            if (cmd.endsWith("\n")) {
+                break;
+            }
+        }
+        if (cmd == "PING\n") {
+            Serial1.write("PONG\n");
+            cmd = "";
+        }
+    }
+    if (cmd.endsWith("\n") || cmd.endsWith("\r")) {
+        cmd.trim();
+        SerialUSB.println(cmd);
+        if (cmd == "PRINT") {
             for (unsigned int i = 0; i < NUM_LEDS; ++i) {
                 int32_t color = Strip.getPixelColor(i);
                 SerialUSB.print(color, HEX);
@@ -833,87 +923,91 @@ void loop() {
                 }
             }
             SerialUSB.println();
-            break;
         }
-        case 'r':
-            SerialUSB.println("red");
+        if (cmd == "BLEND RED") {
             delete CurrentActor;
             SingleColor[0] = 0xFF0000;
             CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
-            break;
-        case 'g':
-            SerialUSB.println("green");
+        }
+        if (cmd == "BLEND GREEN") {
             delete CurrentActor;
             SingleColor[0] = 0x00FF00;
             CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
-            break;
-        case 'b':
-            SerialUSB.println("blue");
+        }
+        if (cmd == "BLEND BLUE") {
             delete CurrentActor;
             SingleColor[0] = 0x0000FF;
             CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
-            break;
-        case 'w':
-            SerialUSB.println("white");
+        }
+        if (cmd == "BLEND WHITE") {
             delete CurrentActor;
             SingleColor[0] = 0xFFFFFF;
             CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
-            break;
-        case 'i':
-            SerialUSB.println("pink");
+        }
+        if (cmd == "BLEND PINK") {
             delete CurrentActor;
             SingleColor[0] = 0xFFC0CB;
             CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
-            break;
-        case 'R':
-            SerialUSB.println("RED");
+        }
+        if (cmd == "SET RED") {
             delete CurrentActor;
             CurrentActor = new TSingleColorGradientActor(0xFF0000);
-            break;
-        case 'G':
-            SerialUSB.println("GREEN");
+        }
+        if (cmd == "SET GREEN") {
             delete CurrentActor;
             CurrentActor = new TSingleColorGradientActor(0x00FF00);
-            break;
-        case 'B':
-            SerialUSB.println("BLUE");
+        }
+        if (cmd == "SET BLUE") {
             delete CurrentActor;
             CurrentActor = new TSingleColorGradientActor(0x0000FF);
-            break;
-        case 'W':
-            SerialUSB.println("WHITE");
+        }
+        if (cmd == "SET WHITE") {
             delete CurrentActor;
             CurrentActor = new TSingleColorGradientActor(0xFFFFFF);
-            break;
-        case 'I':
-            SerialUSB.println("PINK");
+        }
+        if (cmd == "SET PINK") {
             delete CurrentActor;
             CurrentActor = new TSingleColorGradientActor(0xFFC0CB);
-            break;
-        case 'n':
+        }
+        if (cmd == "LOCK") {
+            lock = true;
+        }
+        if (cmd == "UNLOCK") {
+            lock = false;
+        }
+        if (cmd == "STOP") {
             delete CurrentActor;
             CurrentActor = nullptr;
-            break;
-        case '0':
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9': {
-            int brightness = (cmd - '0') * 255 / 9;
+            lock = false;
+        }
+        if (cmd.startsWith("SET ")) {
+            cmd = cmd.substring(4);
+            if (cmd.length() == 6) {
+                delete CurrentActor;
+                CurrentActor = new TSingleColorActor(from_hex(cmd));
+            }
+        }
+        if (cmd.startsWith("BLEND ")) {
+            cmd = cmd.substring(6);
+            if (cmd.length() == 6) {
+                delete CurrentActor;
+                SingleColor[0] = from_hex(cmd);
+                CurrentActor = new TSingleRandomSmoothBlenderActor<decltype(SingleColor)>(SingleColor, Strip);
+            }
+        }
+        if (cmd.startsWith("BRIGHTNESS ")) {
+            cmd = cmd.substring(11);
+            int brightness = 255;
+            if (cmd.length() == 1) {
+                brightness = from_hex(cmd) * 255 / 15;
+            } else if (cmd.length() == 2) {
+                brightness = from_hex(cmd);
+            }
             SerialUSB.print("Setting brightness to ");
             SerialUSB.println(brightness);
             Strip.setBrightness(brightness);
-            break;   
         }
-        default:
-            SerialUSB.println("Unknown command");
-            break;
-        }
+        cmd = "";
         StrategyStartTime = now;
     }
 }
